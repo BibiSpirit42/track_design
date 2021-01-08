@@ -1,5 +1,5 @@
-# from sympy import *
-from sympy.geometry import Point
+ # from sympy import *
+from sympy.geometry import *
 # import math
 import random
 import operator
@@ -35,8 +35,8 @@ availableParts.append(["C8207", "LINE", 175])
 
 # R2: 214 - 370, center 292, C8234 (22.5), C8206 (45), C8203 (90, line change)
 # availableParts.append(["C8234", "CURVE", 292, 22.5])
-availableParts.append(["C8206", "CURVE", 292, 45])
-# availableParts.append(["C8203", "CURVE", 292, 90])
+# availableParts.append(["C8206", "CURVE", 292, 45])
+availableParts.append(["C8203", "CURVE", 292, 90])
 
 # R3: 370 - 526, center 448, C8204 (22.5)
 # availableParts.append(["C8204", "CURVE", 448, 22.5])
@@ -54,8 +54,10 @@ def degreesToRadians(deg):
 # followed by a tuple (x,y) that is the center of the circle, and the radius.
 # Next comes the start and ending angle on the "unit circle" (0 to 360)
 #  of the circle we want to draw, and finally the thickness in pixels
-def drawCircleArc(screen,scale,color,center,radius,startDeg,endDeg,thickness):
-	center = map(lambda x: scale * x, center)
+def drawCircleArc(screen,pCenter,sCenter,scale,color,center,radius,startDeg,endDeg,thickness):
+	xCenter, yCenter = pCenter
+	xSCenter, ySCenter = sCenter
+	center = (xSCenter + scale * (center[0] - xCenter), ySCenter - scale * (center[1] - yCenter))
 	radius = scale * radius
 	(x,y) = center
 	rect = (x-radius,y-radius,radius*2,radius*2)
@@ -73,7 +75,7 @@ class Part:
 		self.pOut = pIn
 		self.angleOut = angleIn
 
-	def draw(self, screen, color):
+	def draw(self, screen, shift, sCenter, scale, color):
 		print("Must be defined in child class")
 	
 	def computePointOut(self):
@@ -94,8 +96,12 @@ class Line(Part):
 		self.pOut = tuple(map(operator.add, self.pIn, tmp))
 		self.angleOut = self.angleIn
 	
-	def draw(self, screen, scale, color):
-		pygame.draw.line(screen,color, tuple(map(lambda x: scale * x, self.pIn)), tuple(map(lambda x: scale * x, self.pOut)), 1)
+	def draw(self, screen, pCenter, sCenter, scale, color):
+		xCenter, yCenter = pCenter
+		xSCenter, ySCenter = sCenter
+		pygame.draw.line(screen,color,
+			(xSCenter + scale * (self.pIn[0]  - xCenter), ySCenter - scale * (self.pIn[1]  - yCenter)),
+			(xSCenter + scale * (self.pOut[0] - xCenter), ySCenter - scale * (self.pOut[1] - yCenter)), 1)
 
 class Curve(Part):
 	def __init__(self, pIn = (0, 0), angleIn = 0, radius = 1, angle = 45, direction = "left"):
@@ -121,14 +127,20 @@ class Curve(Part):
 		self.pOut = tuple(map(operator.add, self.center, tmp2))
 		self.angleOut = (self.angleIn + coeff * self.angle) % 360
 
-	def draw(self, screen, scale, color):
+	def draw(self, screen, pCenter, sCenter, scale, color):
 		if self.direction == "left":
-			drawCircleArc(screen, scale, color, self.center, self.radius, 90 - self.angleIn - self.angle, 90 - self.angleIn,1)
+			startAngle = self.angleIn - 90
+			stopAngle = self.angleIn - 90 + self.angle
+			# print("left -> startAngle=" + str(startAngle) + " stopAngle=" + str(stopAngle))
+			drawCircleArc(screen, pCenter, sCenter, scale, color, self.center, self.radius, startAngle, stopAngle,1)
 		else:
-			drawCircleArc(screen, scale, color, self.center, self.radius, -self.angleIn - 90, -self.angleIn - 90 + self.angle,1)
+			startAngle = self.angleIn + 90 - self.angle
+			stopAngle = self.angleIn + 90
+			# print("right -> startAngle=" + str(startAngle) + " stopAngle=" + str(stopAngle))
+			drawCircleArc(screen, pCenter, sCenter, scale, color, self.center, self.radius, startAngle, stopAngle,1)
 
-def createPopulation(maxSize=20):
-	origin = (2000, 2000)
+def createPopulation(tablePoly, maxSize=20):
+	origin = (0, 10)
 	alpha = 0
 
 	# TODO: donner plus de liberte
@@ -136,9 +148,9 @@ def createPopulation(maxSize=20):
 	firstPart.computePointOut()
 
 	track = [firstPart]
-	return toto(track, maxSize)
+	return toto(tablePoly, track, maxSize=maxSize)
 
-def toto(track, maxSize=20):
+def toto(tablePoly, track, segments = [], maxSize=20):
 	if len(track) > maxSize:
 		return []
 	
@@ -147,8 +159,6 @@ def toto(track, maxSize=20):
 	dist = sqrt( (x2 - x1)**2 + (y2 - y1)**2 )
 	# print(str(len(track)) + " dist: " + str(dist))
 	
-	result = []
-
 	if dist < 10:
 		a1 = track[0].angleIn
 		a2 = track[-1].angleOut
@@ -156,24 +166,47 @@ def toto(track, maxSize=20):
 		# print("angle: " + str(angle))
 		
 		if angle == 0:
-			result += [track]
+			return [track]
 	elif dist > 4000:
 		return []
+	else:
+		# print("track: " + str(track))
+		segment = Segment(track[-1].pIn, track[-1].pOut)
+		if(len(intersection(segment, tablePoly)) > 0):
+			return []
+		# print("segments: " + str(segments))
+		# print("segment: " + str(segment))
+		for s in segments[:-1]:
+			# print("s: " + str(s))
+			if(len(intersection(segment, s)) > 0):
+				return []
+		segments = segments + [segment]
 	
+	result = []
 	for part in availableParts:
 		if(part[1] == "LINE"):
 			p = Line(track[-1].pOut, track[-1].angleOut, length = part[2])
 			p.computePointOut()
-			result += toto(track + [p], maxSize)
+			result += toto(tablePoly, track + [p], segments, maxSize)
 		else:
 			for d in ("left", "right"):
 				p = Curve(track[-1].pOut, track[-1].angleOut, radius = part[2], angle = part[3], direction = d)
 				p.computePointOut()
-				result += toto(track + [p], maxSize)
+				result += toto(tablePoly, track + [p], segments, maxSize)
 	return result
 
-population = createPopulation(15)
-print(len(population))
+def drawTable(table, screen, pCenter, sCenter, scale, color):
+	xCenter, yCenter = pCenter
+	xSCenter, ySCenter = sCenter
+
+	polygon = [(xSCenter + scale * (p[0] - xCenter), ySCenter - scale * (p[1]  - yCenter)) for p in table]
+	pygame.draw.polygon(screen, green, polygon, width=1)
+
+table = [(-500,0), (500, 0), (500, 1000), (-500, 1000)]
+tablePoly = Polygon(*table)
+
+population = createPopulation(tablePoly, 10)
+print("Nombre de circuits valides : " + str(len(population)))
 
 
 white = (255,255,255);
@@ -187,15 +220,48 @@ screen = pygame.display.set_mode((800,600), flags=pygame.RESIZABLE)
 # random.choice([red, green, blue])
 while True:
 
+	# bContinue = True
 	for event in pygame.event.get():
 		if event.type == QUIT:
 			pygame.quit(); exit();
+		# if event.type == pygame.KEYUP:
+			# if event.key == pygame.K_SPACE:
+				# print("============")
+				# bContinue = False
+	# if bContinue: continue
 
 	screen.fill(white);
 
+	xMin = inf
+	yMin = inf
+	xMax = -inf
+	yMax = -inf
 	for parts in population:
 		for p in parts:
-			p.draw(screen, 0.2, blue)
+			x1, y1 = p.pIn
+			x2, y2 = p.pOut
+			xMin = min(xMin, x1, x2)
+			xMax = max(xMax, x1, x2)
+			yMin = min(yMin, y1, y2)
+			yMax = max(yMax, y1, y2)
+	# print(str(xMin) + " " + str(yMin) + " " + str(xMax) + " " + str(yMax))
+	width, height = screen.get_size()
+	sCenter = (ceil(width / 2), ceil(height / 2))
+	xScale = (width - 20) / (xMax - xMin)
+	yScale = (height - 20) / (yMax - yMin)
+	scale = min(xScale, yScale)
+	xCenter = (xMin + xMax) / 2
+	yCenter = (yMin + yMax) / 2
+	pCenter = (xCenter, yCenter)
+	# print(str(screen.get_size()) + " " + str(scale) + " " + str(sCenter) + " " + str(pCenter))
+	for parts in population:
+		for p in parts:
+			p.draw(screen, pCenter, sCenter, scale, blue)
+	# parts = random.choice(population)
+	# for p in parts:
+		# p.draw(screen, pCenter, sCenter, scale, blue)
+
+	drawTable(table, screen, pCenter, sCenter, scale, green)
 
 	pygame.display.update()
 	# pygame.time.wait(1000)
