@@ -11,6 +11,8 @@ from sys import exit
 
 from math import *
 
+DEBUG = False
+
 # availableParts = [name, LINE, length]
 # availableParts = [name, CURVE, radius, angle]
 availableParts = []
@@ -34,8 +36,8 @@ availableParts.append(["C8207", "LINE", 175])
 # availableParts.append(["C8201", "CURVE", 136, 90])
 
 # R2: 214 - 370, center 292, C8234 (22.5), C8206 (45), C8203 (90, line change)
-# availableParts.append(["C8234", "CURVE", 292, 22.5])
-# availableParts.append(["C8206", "CURVE", 292, 45])
+availableParts.append(["C8234", "CURVE", 292, 22.5])
+availableParts.append(["C8206", "CURVE", 292, 45])
 availableParts.append(["C8203", "CURVE", 292, 90])
 
 # R3: 370 - 526, center 448, C8204 (22.5)
@@ -48,6 +50,10 @@ availableParts.append(["C8203", "CURVE", 292, 90])
 #  arc in degrees instead of radians
 def degreesToRadians(deg):
     return deg/180.0 * pi
+
+def debug(message):
+	global log
+	if DEBUG and log is not None: log.write(message + "\n")
 
 # Draw an arc that is a portion of a circle.
 # We pass in screen and color,
@@ -68,7 +74,8 @@ def drawCircleArc(screen,pCenter,sCenter,scale,color,center,radius,startDeg,endD
 
 
 class Part:
-	def __init__(self, pIn = (0, 0), angleIn = 0):
+	def __init__(self, name = "", pIn = (0, 0), angleIn = 0):
+		self.name = name
 		self.pIn = pIn
 		self.angleIn = angleIn
 		
@@ -85,8 +92,8 @@ class Part:
 		pass
 
 class Line(Part):
-	def __init__(self, pIn = (0, 0), angleIn = 0, length = 1):
-		super().__init__(pIn, angleIn)
+	def __init__(self, name = "", pIn = (0, 0), angleIn = 0, length = 1):
+		super().__init__(name, pIn, angleIn)
 		
 		self.length = length
 	
@@ -104,8 +111,8 @@ class Line(Part):
 			(xSCenter + scale * (self.pOut[0] - xCenter), ySCenter - scale * (self.pOut[1] - yCenter)), 1)
 
 class Curve(Part):
-	def __init__(self, pIn = (0, 0), angleIn = 0, radius = 1, angle = 45, direction = "left"):
-		super().__init__(pIn, angleIn)
+	def __init__(self, name = "", pIn = (0, 0), angleIn = 0, radius = 1, angle = 45, direction = "left"):
+		super().__init__(name, pIn, angleIn)
 		
 		self.radius = radius
 		self.angle = angle
@@ -139,26 +146,39 @@ class Curve(Part):
 			# print("right -> startAngle=" + str(startAngle) + " stopAngle=" + str(stopAngle))
 			drawCircleArc(screen, pCenter, sCenter, scale, color, self.center, self.radius, startAngle, stopAngle,1)
 
-def createPopulation(tablePoly, maxSize=20):
+def createTracks(maxSize=20):
 	origin = (0, 10)
 	alpha = 0
 
 	# TODO: donner plus de liberte
-	firstPart = Line(origin, alpha, 175)
+	firstPart = Line(name="Start", pIn=origin, angleIn=alpha, length=175)
 	firstPart.computePointOut()
 
 	track = [firstPart]
-	return toto(tablePoly, track, maxSize=maxSize)
+	return recursiveTrackCreation(track, maxSize=maxSize)
 
-def toto(tablePoly, track, segments = [], maxSize=20):
+def recursiveTrackCreation(track, segments = [], maxSize=20):
+	global tablePoly
+	global log
+	global DEBUG
+	
+	# print(track[-1])
+	longestTrack = 175
+	
 	if len(track) > maxSize:
 		return []
+	
+	if(DEBUG):
+		tmp = ""
+		for t in track:
+			tmp += t.name + " "
+		debug(tmp, log)
 	
 	x1, y1 = track[0].pIn
 	x2, y2 = track[-1].pOut
 	dist = sqrt( (x2 - x1)**2 + (y2 - y1)**2 )
-	# print(str(len(track)) + " dist: " + str(dist))
 	
+	# print(str(len(track)) + " dist: " + str(dist))
 	if dist < 10:
 		a1 = track[0].angleIn
 		a2 = track[-1].angleOut
@@ -167,7 +187,7 @@ def toto(tablePoly, track, segments = [], maxSize=20):
 		
 		if angle == 0:
 			return [track]
-	elif dist > 4000:
+	elif dist > 4000 or dist > (maxSize - len(track)) * longestTrack:
 		return []
 	else:
 		# print("track: " + str(track))
@@ -176,23 +196,35 @@ def toto(tablePoly, track, segments = [], maxSize=20):
 			return []
 		# print("segments: " + str(segments))
 		# print("segment: " + str(segment))
-		for s in segments[:-1]:
+		# for s in segments[:-1]:
+			# # print("s: " + str(s))
+			# if(len(intersection(segment, s)) > 0):
+				# return []
+		
+		# On teste la distance entre le pIn du segment actuel et le pIn du segment a tester
+		# pour eviter de calculer des intersections quand les segments sont trop eloignes
+		for i in range(len(segments) - 1):
+			s = segments[i]
+			t = track[i]
 			# print("s: " + str(s))
-			if(len(intersection(segment, s)) > 0):
+			# print("t: " + str(t))
+			xt, yt = t.pIn
+			dist2 = sqrt( (x2 - xt)**2 + (y2 - yt)**2 )
+			if(dist2 < 2*longestTrack and len(intersection(segment, s)) > 0):
 				return []
 		segments = segments + [segment]
 	
 	result = []
 	for part in availableParts:
 		if(part[1] == "LINE"):
-			p = Line(track[-1].pOut, track[-1].angleOut, length = part[2])
+			p = Line(name=part[0], pIn=track[-1].pOut, angleIn=track[-1].angleOut, length=part[2])
 			p.computePointOut()
-			result += toto(tablePoly, track + [p], segments, maxSize)
+			result += recursiveTrackCreation(track + [p], segments, maxSize)
 		else:
 			for d in ("left", "right"):
-				p = Curve(track[-1].pOut, track[-1].angleOut, radius = part[2], angle = part[3], direction = d)
+				p = Curve(name=part[0], pIn=track[-1].pOut, angleIn=track[-1].angleOut, radius=part[2], angle=part[3], direction=d)
 				p.computePointOut()
-				result += toto(tablePoly, track + [p], segments, maxSize)
+				result += recursiveTrackCreation(track + [p], segments, maxSize)
 	return result
 
 def drawTable(table, screen, pCenter, sCenter, scale, color):
@@ -202,12 +234,18 @@ def drawTable(table, screen, pCenter, sCenter, scale, color):
 	polygon = [(xSCenter + scale * (p[0] - xCenter), ySCenter - scale * (p[1]  - yCenter)) for p in table]
 	pygame.draw.polygon(screen, green, polygon, width=1)
 
+
+if(DEBUG is True):
+	log = open("log.txt", "w")
+else:
+	log = None
+
 table = [(-500,0), (500, 0), (500, 1000), (-500, 1000)]
 tablePoly = Polygon(*table)
 
-population = createPopulation(tablePoly, 10)
+population = createTracks(10)
 print("Nombre de circuits valides : " + str(len(population)))
-
+if(log is not None): log.close()
 
 white = (255,255,255);
 red = (255,0,0);
